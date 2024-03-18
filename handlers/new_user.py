@@ -2,6 +2,7 @@ import asyncio
 import datetime
 
 from aiogram import Dispatcher, types, Router, Bot, F
+from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command, CommandStart, StateFilter, BaseFilter
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import CallbackQuery, Message, URLInputFile, ReplyKeyboardRemove
@@ -35,6 +36,31 @@ class IsActive(BaseFilter):
         # print(f'Проверка на частность: {message.chat.type}\n')
         user = get_or_create_user(message.from_user)
         return user.is_active
+
+
+class IsChatMember(BaseFilter):
+    # Проверяет состоит ли пользователь в группе
+    def __init__(self) -> None:
+        self.GROUP_ID = int(conf.tg_bot.GROUP_ID)
+
+    async def __call__(self, message: Message, event_from_user, bot: Bot, *args, **kwargs) -> bool:
+        if isinstance(message, CallbackQuery):
+            message = message.message
+        member = await bot.get_chat_member(chat_id=self.GROUP_ID, user_id=event_from_user.id)
+        status = member.status
+        is_member = status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+        return is_member
+
+
+async def check_is_member(tg_id, bot) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id=conf.tg_bot.GROUP_ID, user_id=tg_id)
+        logger.debug(member)
+        status = member.status
+        return status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+    except Exception as err:
+        logger.error(err)
+
 
 router: Router = Router()
 router.message.filter(IsPrivate())
@@ -110,18 +136,14 @@ async def process_start_command(message: Message, state: FSMContext):
             if not btn:
                 await state.set_state(FSMAnket.text)
         else:
-            if user.analyse_count >= 3:
-                await message.answer(f'Ваш баланс {user.cash} руб. Стоимость анализа составляет 20 руб.', reply_markup=start_kb)
-            else:
-                await message.answer(
-                    f'Здорово! Теперь мы можем приступить к анализу сотрудников для твоей компании.\n',
-                    reply_markup=demo_start_kb)
+            await message.answer(
+                f'Здорово! Теперь мы можем приступить к анализу сотрудников для твоей компании.\n',
+                reply_markup=demo_start_kb)
     except Exception as err:
         logger.error(err)
 
 
 def format_confirm_text(answers: dict) -> str:
-    # {0: 'короткие ролики с вашим баннером', 1: 'от 30 до 50 миллионов',...}
     text = ''
     for num, question_block in enumerate(FSMAnket.question_blocks):
         question = question_block[0]
@@ -245,22 +267,24 @@ async def in_confirm(callback: CallbackQuery, state: FSMContext, bot: Bot):
 
 @router.callback_query(F.data == 'analyse')
 @router.message(F.text == 'Анализ сотрудника', IsActive())
-async def questions_text(message: Message, state: FSMContext, bot: Bot):
+async def analyse(message: Message, state: FSMContext, bot: Bot):
     if isinstance(message, CallbackQuery):
         user = get_or_create_user(message.from_user)
         message = message.message
         await message.delete()
     else:
         user = get_or_create_user(message.from_user)
-    if user.cash < 20:
-        await message.answer(f'Пополните баланс для использования сервиса по проверке совместимости.\nМинимальная сумма пополнения: 100 рублей. Стоимость 1 анализа: 20 рублей.\nВаш баланс: {user.cash} руб.', reply_markup=start_kb)
-        return
-    await message.answer('Укажите дату рождения кандидата или сотрудника в формате "ДД.ММ.ГГГГ"')
-    await state.set_state(FSMAnket.new_analyse)
+    is_member = await check_is_member(user.tg_id, bot)
+    logger.debug(is_member)
+    if is_member or user.analyse_count < 3:
+        await message.answer('Укажите дату рождения кандидата или сотрудника в формате "ДД.ММ.ГГГГ"')
+        await state.set_state(FSMAnket.new_analyse)
+    else:
+        await message.answer('Бот доступен для подписчиков платного канала "нумерология в бизнесе" (https://t.me/+fsp_LQ1OSPtmYWRi)')
 
 
 @router.message(FSMAnket.new_analyse, IsActive())
-async def questions_text(message: Message, state: FSMContext, bot: Bot):
+async def analyse_result(message: Message, state: FSMContext, bot: Bot):
     try:
         user = get_or_create_user(message.from_user)
         birthday = datetime.datetime.strptime(message.text.strip(), '%d.%m.%Y').date()
@@ -283,16 +307,16 @@ async def questions_text(message: Message, state: FSMContext, bot: Bot):
         )
         await message.answer('Выполняется анализ')
         user = get_or_create_user(message.from_user)
-        user.set('cash', user.cash - 20)
+        # user.set('cash', user.cash - 20)
 
         await asyncio.sleep(3)
-        if user.analyse_count >= 3:
-            await message.answer(result_text, reply_markup=start_kb)
-            await message.answer(f'Ваш баланс: {user.cash}')
-        else:
-            await message.answer(result_text, reply_markup=demo_start_kb)
+        # if user.analyse_count >= 3:
+        #     await message.answer(result_text, reply_markup=start_kb)
+        #     await message.answer(f'Ваш баланс: {user.cash}')
+        # else:
+        #     await message.answer(result_text, reply_markup=demo_start_kb)
+        await message.answer(result_text, reply_markup=start_kb)
         user.set('analyse_count', user.analyse_count + 1)
-
         await state.clear()
 
     except ValueError as err:

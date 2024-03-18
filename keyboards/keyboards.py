@@ -17,7 +17,7 @@ def custom_kb(width: int, buttons_dict: dict) -> InlineKeyboardMarkup:
 
 start_kb_b = {
     'Анализ сотрудника': 'analyse',
-    'Баланс и пополнение': 'balance',
+    # 'Баланс и пополнение': 'balance',
 }
 
 demo_start_kb_b = {
