@@ -1,0 +1,15 @@
+[Unit]
+Description=hrbot
+After=network.target
+
+[Service]
+EnvironmentFile=
+ExecStart=/home/tg-admin/Test-For-Hr-compatible/venv/bin/python3 main.py
+ExecReload=/home/tg-admin/Test-For-Hr-compatible/venv/bin/python3 main.py
+WorkingDirectory=/home/tg-admin/Test-For-Hr-compatible
+KillMode=process
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
